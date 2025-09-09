@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Plate Finder Lite</title>
+  <style>
+    :root{--bg:#fff;--ink:#111;--muted:#666;--ring:#dadada}
+    *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
+    body{margin:0;background:var(--bg);color:var(--ink)}
+    header{padding:20px 16px;border-bottom:1px solid var(--ring)}
+    h1{margin:0;font-size:20px}
+    main{max-width:900px;margin:20px auto;padding:0 16px}
+    .row{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0}
+    input[type="text"]{flex:1;min-width:260px;padding:10px 12px;border:1px solid var(--ring);border-radius:10px}
+    button,label.button{padding:10px 12px;border:1px solid var(--ring);border-radius:10px;background:#f8f8f8;cursor:pointer}
+    button:hover,label.button:hover{background:#f1f1f1}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{padding:10px;border-bottom:1px solid var(--ring);text-align:left;font-size:14px}
+    td small{color:var(--muted)}
+    .muted{color:var(--muted)}
+    .pill{display:inline-block;padding:2px 8px;border:1px solid var(--ring);border-radius:999px;font-size:12px}
+    .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .notice{margin-top:12px;color:var(--muted);font-size:13px}
+  </style>
+</head>
+<body>
+  <header><h1>Plate Finder Lite</h1></header>
+  <main>
+    <div class="row">
+      <input id="q" type="text" placeholder="Search by SKU, plate #, or stamp name…" autocomplete="off" />
+      <div class="controls">
+        <label class="button" for="csvFile">Import CSV</label>
+        <input id="csvFile" type="file" accept=".csv" style="display:none" />
+        <button id="exportBtn">Export CSV</button>
+        <button id="addBtn">Add Entry</button>
+        <span class="pill" id="countPill">0 items</span>
+      </div>
+    </div>
+
+    <table id="tbl">
+      <thead>
+        <tr><th>Plate #</th><th>SKU</th><th>Stamp name</th><th class="muted">Actions</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <p class="notice">
+      Data is saved to your browser automatically. Import a CSV anytime.
+      Format: <code>plate,sku,name[,retired]</code> (set retired to <code>yes</code> to mark in red).
+    </p>
+  </main>
+
+  <script>
+    const KEY = "plate-finder-lite/csv";
+    const retiredStyle = "background: #ffecec";
+    function csvToRows(csv){ return csv.trim().split(/\r?\n/).map(line=>line.split(",").map(s=>s.trim())); }
+    function rowsToCsv(rows){ return rows.map(r=>r.map(c=>String(c||"").replace(/\n/g," ")).join(",")).join("\n"); }
+
+    const sampleCsv = `1001,U-ROSE-01,Rose Cluster,
+1002,U-HELLO-02,Hello Script,
+1200,U-ALPHA-SET,Alphabet Set,
+1305,U-COW-ANGUS,Angus Cow,yes
+2102,U-FLORAL-05,Floral Corner,
+3100,U-BUTCHER-ANG,Butcher Angus,yes`;
+
+    function loadCsv(){ const saved = localStorage.getItem(KEY); return saved && saved.trim() ? saved : sampleCsv; }
+    function saveCsv(csv){ localStorage.setItem(KEY, csv); }
+
+    function parse(csv){
+      const rows = csvToRows(csv).filter(r=>r.length>=3);
+      return rows.map(([plate, sku, name, retired])=>({plate, sku, name, retired: (retired||"").toLowerCase()==="yes"}));
+    }
+    function toRows(objs){ return objs.map(o=>[o.plate,o.sku,o.name,o.retired?"yes":""]); }
+
+    const q = document.getElementById("q");
+    const tbody = document.querySelector("#tbl tbody");
+    const countPill = document.getElementById("countPill");
+    let data = parse(loadCsv());
+
+    function render(){
+      const term = q.value.trim().toLowerCase();
+      const rows = data.filter(d=>{
+        if(!term) return true;
+        return [d.plate,d.sku,d.name].some(v=>String(v).toLowerCase().includes(term));
+      });
+      tbody.innerHTML = "";
+      rows.forEach((d, i)=>{
+        const tr = document.createElement("tr");
+        if(d.retired) tr.style = retiredStyle;
+        tr.innerHTML = `
+          <td>${d.plate}</td>
+          <td>${d.sku}</td>
+          <td>${d.name} ${d.retired ? '<small>(retired)</small>' : ''}</td>
+          <td>
+            <button data-idx="${i}" data-action="edit">Edit</button>
+            <button data-idx="${i}" data-action="remove">Remove</button>
+          </td>`;
+        tbody.appendChild(tr);
+      });
+      countPill.textContent = `${data.length} items`;
+      saveCsv(rowsToCsv(toRows(data)));
+    }
+
+    q.addEventListener("input", render);
+
+    document.getElementById("exportBtn").addEventListener("click", ()=>{
+      const csv = rowsToCsv(toRows(data));
+      const blob = new Blob([csv], {type:"text/csv"});
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "plates.csv";
+      a.click();
+    });
+
+    document.getElementById("csvFile").addEventListener("change", e=>{
+      const file = e.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = () => { data = parse(reader.result); render(); };
+      reader.readAsText(file);
+      e.target.value = "";
+    });
+
+    document.getElementById("addBtn").addEventListener("click", ()=>{
+      const plate = prompt("Plate #"); if(!plate) return;
+      const sku = prompt("SKU"); if(!sku) return;
+      const name = prompt("Stamp name") || "";
+      const retired = confirm("Mark as retired? OK = Yes, Cancel = No");
+      data.push({plate, sku, name, retired});
+      render();
+    });
+
+    tbody.addEventListener("click", (e)=>{
+      const btn = e.target.closest("button"); if(!btn) return;
+      const {action, idx} = btn.dataset;
+      if(action==="remove" && confirm("Delete this entry?")){ data.splice(+idx,1); render(); }
+      if(action==="edit"){
+        const d = data[+idx];
+        const plate = prompt("Plate #", d.plate); if(!plate) return;
+        const sku = prompt("SKU", d.sku); if(!sku) return;
+        const name = prompt("Stamp name", d.name) || "";
+        const retired = confirm("Mark as retired? OK = Yes, Cancel = No");
+        data[+idx] = {plate, sku, name, retired};
+        render();
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>
